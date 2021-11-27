@@ -1,0 +1,121 @@
+docker pull 36.138.33.17:50000/httpserver:v1  #拉取httpserver镜像到本地;
+
+#配置和代码分离;
+kubectl create configmap httpserver --from-literal=server_name=chalon_server_001 --from-literal=server_port=80
+kubectl get cm httpserver -o yaml
+
+#创建pod的yaml文件
+cat <<eof> httpserver.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    run: httpserver
+  name: httpserver
+  namespace: default
+spec:
+  containers:
+  - image: 36.138.33.17:50000/httpserver:v1
+    imagePullPolicy: IfNotPresent
+    name: httpserver
+    env:
+    - name: server_name
+      valueFrom: 
+        configMapKeyRef:
+          name: httpserver
+          key: server_name
+    - name: server_port
+      valueFrom: 
+        configMapKeyRef:
+          name: httpserver
+          key: server_port
+    resources:
+      requests:
+        cpu: "200m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+    volumeMounts:
+    - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      name: kube-api-access-mpzvg
+      readOnly: true
+    args:
+    - /bin/sh
+    - -c
+    - touch /tmp/health; sleep 1000; rm -rf /tmp/health
+    livenessProbe: 
+      exec:
+        command: ["test","-e","/tmp/health"]
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 2
+      failureThreshold: 3
+    readinessProbe:
+      tcpSocket:
+        port: 80
+      initialDelaySeconds: 5
+      periodSeconds: 10   
+  dnsPolicy: ClusterFirst
+  enableServiceLinks: true
+  nodeName: vm-0-81-ubuntu
+  preemptionPolicy: PreemptLowerPriority
+  priority: 0
+  restartPolicy: Always
+  schedulerName: default-scheduler
+  securityContext: {}
+  serviceAccount: default
+  serviceAccountName: default
+  terminationGracePeriodSeconds: 30
+  tolerations:
+  - effect: NoExecute
+    key: node.kubernetes.io/not-ready
+    operator: Exists
+    tolerationSeconds: 300
+  - effect: NoExecute
+    key: node.kubernetes.io/unreachable
+    operator: Exists
+    tolerationSeconds: 300
+  volumes:
+  - name: kube-api-access-mpzvg
+    projected:
+      defaultMode: 420
+      sources:
+      - serviceAccountToken:
+          expirationSeconds: 3607
+          path: token
+      - configMap:
+          items:
+          - key: ca.crt
+            path: ca.crt
+          name: kube-root-ca.crt
+      - downwardAPI:
+          items:
+          - fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+            path: namespace
+eof
+kubectl create -f httpserver.yaml
+
+#日常运维需求
+kubectl get pod httpserver -o wide
+kubectl get pod httpserver -o yaml
+ping -c 3 $(kubectl get pod httpserver -o wide |awk 'NR==2{print $8}')
+kubectl get pod httpserver -o jsonpath={.spec.containers[*].name}           #查看Pod里业务容器的命令；
+kubectl describe pod httpserver
+kubectl logs httpserver
+docker ps |grep httpserver
+kubectl exec httpserver -- ls /tmp/health
+kubectl exec -it httpserver -- echo $server_name
+
+#Kubectl日志输出详细程度和调试
+kubectl get pod httpserver --v=0	#通常对此有用，*始终*对运维人员可见。
+kubectl get pod httpserver --v=1	#如果您不想要详细程度，则为合理的默认日志级别。
+kubectl get pod httpserver --v=2	#有关服务的有用稳定状态信息以及可能与系统中的重大更改相关的重要日志消息。这是大多数系统的建议默认日志级别。
+kubectl get pod httpserver --v=3	#有关更改的扩展信息。
+kubectl get pod httpserver --v=4	#Debug 级别。
+kubectl get pod httpserver --v=6	#显示请求的资源。
+kubectl get pod httpserver --v=7	#显示 HTTP 请求头。
+kubectl get pod httpserver --v=8	#显示 HTTP 请求内容。
+kubectl get pod httpserver --v=9	#显示 HTTP 请求内容而不截断内容。
